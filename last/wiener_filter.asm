@@ -5,8 +5,8 @@ output_file:  .asciiz "output.txt"
 buf_size:     .word 32768
 buffer:       .space 32768
 NUM_SAMPLES:  .word 10
-desired:      .space 40
-input:        .space 40
+desired:      .float 0.0:10
+input:        .float 0.0:10
 crosscorr:    .space 40
 autocorr:     .space 40
 R:            .space 400
@@ -26,6 +26,7 @@ space_str:    .asciiz " "
 str_buf:      .space 32
 temp_str:     .space 32
 file_buffer:  .space 1024
+fiel_buffer2: .space 2048
 error_open:   .asciiz "Error: Can not open file"
 error_size:   .asciiz "Error: size not match"
 
@@ -35,6 +36,155 @@ error_size:   .asciiz "Error: size not match"
 main:
     # --- Open and read input file for input[] ---
     # TODO
+       addi $sp, $sp, -12
+    sw   $ra, 8($sp)
+    sw   $s0, 4($sp)
+    sw   $s1, 0($sp)
+
+    # --- Read "input.txt" ---
+    li   $v0, 13
+    la   $a0, input_file
+    li   $a1, 0
+    li   $a2, 0
+    syscall
+    bltz $v0, error_open
+    move $s0, $v0
+
+    li   $v0, 14
+    move $a0, $s0
+    la   $a1, file_buffer2
+    li   $a2, 2048
+    syscall
+    
+    la   $t0, file_buffer2       # Null terminate buffer
+    add  $t0, $t0, $v0
+    sb   $zero, 0($t0)
+
+    li   $v0, 16                # Close file
+    move $a0, $s0
+    syscall
+
+    # Parse into input_signal
+    la   $t0, file_buffer2
+    sw   $t0, buffer_ptr
+    li   $s0, 0
+    la   $s1, input
+
+    read_input_loop:
+    beq  $s0, 10, read_desired
+    jal  parse_float
+    s.s  $f0, 0($s1)            
+    addi $s0, $s0, 1
+    addi $s1, $s1, 4
+    j    read_input_loop
+
+    # --- Read "desired.txt" ---
+    read_desired:
+    li   $v0, 13
+    la   $a0, desired_file
+    li   $a1, 0
+    li   $a2, 0
+    syscall
+    bltz $v0, error_open
+    move $s0, $v0
+
+    li   $v0, 14
+    move $a0, $s0
+    la   $a1, file_buffer2
+    li   $a2, 2048
+    syscall
+
+    la   $t0, file_buffer2
+    add  $t0, $t0, $v0
+    sb   $zero, 0($t0)
+
+    li   $v0, 16
+    move $a0, $s0
+    syscall
+
+    # Parse into desired_signal
+    la   $t0, file_buffer2
+    sw   $t0, buffer_ptr
+    li   $s0, 0
+    la   $s1, desired
+
+    read_desired_loop:
+    beq  $s0, 10, read_done
+    jal  parse_float
+    s.s  $f0, 0($s1)           
+    addi $s0, $s0, 1
+    addi $s1, $s1, 4
+    j    read_desired_loop
+
+    read_done:
+    lw   $s1, 0($sp)
+    lw   $s0, 4($sp)
+    lw   $ra, 8($sp)
+    addi $sp, $sp, 12
+    jr   $ra
+    
+    parse_float:
+    lw   $t0, buffer_ptr
+    l.s  $f0, zero
+    l.s  $f1, ten
+    li   $t2, 0
+
+    skip_whitespace:
+    lb   $t1, 0($t0)
+    beq  $t1, 32, advance_ws
+    beq  $t1, 10, advance_ws
+    beq  $t1, 13, advance_ws
+    beq  $t1, 9,  advance_ws
+    j    check_sign
+
+    advance_ws: 
+    addi $t0, $t0, 1
+    j    skip_whitespace
+
+    check_sign:
+    lb   $t1, 0($t0)
+    bne  $t1, '-', parse_int_part
+    li   $t2, 1
+    addi $t0, $t0, 1
+
+    parse_int_part:
+    lb   $t1, 0($t0)
+    blt  $t1, '0', check_dot
+    bgt  $t1, '9', check_dot
+    sub  $t1, $t1, '0'
+    mtc1 $t1, $f2
+    cvt.s.w $f2, $f2
+    mul.s $f0, $f0, $f1
+    add.s $f0, $f0, $f2
+    addi $t0, $t0, 1
+    j    parse_int_part
+
+    check_dot:
+    lb   $t1, 0($t0)
+    bne  $t1, '.', apply_sign
+    addi $t0, $t0, 1
+    l.s  $f3, one
+
+    parse_frac_part:
+    lb   $t1, 0($t0)
+    blt  $t1, '0', apply_sign
+    bgt  $t1, '9', apply_sign
+    sub  $t1, $t1, '0'
+    mul.s $f3, $f3, $f1 
+    mtc1 $t1, $f2
+    cvt.s.w $f2, $f2
+    div.s $f2, $f2, $f3
+    add.s $f0, $f0, $f2
+    addi $t0, $t0, 1
+    j    parse_frac_part
+
+    apply_sign:
+    beq  $t2, 0, parse_finish
+    neg.s $f0, $f0
+
+    parse_finish:
+    sw   $t0, buffer_ptr
+    jr   $ra
 
     # --- compute crosscorrelation ---
     la   $a0, desired
