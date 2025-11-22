@@ -24,9 +24,7 @@ main:
     # Load N into $s7 throughout the program
     lw    $s7, NUM_SAMPLES     
 
-    # ==========================================
-    # PART 1: COMPUTATIONS (CALL ALL FUNCTIONS)
-    # ==========================================
+  
     # --- compute autocorrelation ---
 
 
@@ -50,9 +48,7 @@ main:
     move  $a2, $s7             
     jal   createToeplitzMatrix
 
-    # ==========================================
-    # PART 2: PRINT RESULTS
-    # ==========================================
+
 
     # --- PRINT CROSS CORRELATION ---
     # Print Cross Correlation Results
