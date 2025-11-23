@@ -209,6 +209,15 @@ main:
     # --- compute MMSE ---
     # TODO  
 
+    # --- Open output file ---
+    # TODO
+    li   $v0, 13
+    la   $a0, output_file
+    li   $a1, 1
+    li   $a2, 0
+    syscall
+    move $s6, $v0          
+    
     # --- Write "Filtered output: " ---
     # TODO
     li   $v0, 15
