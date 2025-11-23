@@ -7,6 +7,7 @@ buffer:       .space 32768
 NUM_SAMPLES:  .word 10
 desired:      .float 0.0:10
 input:        .float 0.0:10
+filtered:     .float 0.0:10
 crosscorr:    .space 40
 autocorr:     .space 40
 R:            .space 400
@@ -206,16 +207,7 @@ main:
     # TODO
 
     # --- compute MMSE ---
-    # TODO
-
-    # --- Open output file ---
-    # TODO
-    li   $v0, 13
-    la   $a0, output_file
-    li   $a1, 1
-    li   $a2, 0
-    syscall
-    move $s6, $v0            
+    # TODO  
 
     # --- Write "Filtered output: " ---
     # TODO
@@ -226,7 +218,7 @@ main:
     syscall
 
     # Write filtered outputs with 1 decimal
-    la   $s1, filtered_samples 
+    la   $s1, filtered 
     lw   $s2, NUM_SAMPLES      
     li   $s0, 0              
     
@@ -363,6 +355,35 @@ applyWienerFilter:
 # ---------------------------------------------------------
 computeMMSE:
     # TODO
+    la   $t0, desired       
+    la   $t1, filtered      
+    lw   $t2, NUM_SAMPLES      
+    
+    mtc1 $zero, $f12            
+    cvt.s.w $f12, $f12          
+
+    mmse_loop:
+    beq  $t2, $zero, mmse_done
+    l.s  $f0, 0($t0)            # d(n)
+    l.s  $f1, 0($t1)            # y(n)
+    #(d - y)^2
+    sub.s $f2, $f0, $f1         # Error
+    mul.s $f2, $f2, $f2         # Square
+    add.s $f12, $f12, $f2       # Sum += Square
+    
+    addi $t0, $t0, 4
+    addi $t1, $t1, 4
+    addi $t2, $t2, -1
+    j    mmse_loop
+
+    mmse_done:
+    l.s   $f5, ten
+    div.s $f12, $f12, $f5       
+    
+    # Store Result in Memory
+    swc1  $f12, mmse
+
+    jr    $ra
 
 # ---------------------------------------------------------
 # round_to_1dec($f12) -> $f0
