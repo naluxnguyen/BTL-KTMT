@@ -30,6 +30,7 @@ file_buffer:  .space 1024
 fiel_buffer2: .space 2048
 error_open:   .asciiz "Error: Can not open file"
 error_size:   .asciiz "Error: size not match"
+esp_f: .float 1.0e-12
 
 .text
 .globl main
@@ -352,6 +353,215 @@ createToeplitzMatrix:
 # ---------------------------------------------------------
 solveLinearSystem:
     # TODO
+    # --- Save caller registers ---
+    addi $sp, $sp, -32
+    sw   $ra, 28($sp)
+    sw   $s0, 24($sp)
+    sw   $s1, 20($sp)
+    sw   $s2, 16($sp)
+    sw   $s3, 12($sp)
+
+    # Save arguments in saved registers
+    move $s0, $a0        # A
+    move $s1, $a1        # b
+    move $s2, $a2        # x
+    move $s3, $a3        # N
+
+    la   $t9, Aug        # base of Aug
+
+#############################################################
+# 1. BUILD AUGMENTED MATRIX [ A | b ]
+#############################################################
+
+    li  $t0, 0           # i = 0
+build_rows:
+    bge $t0, $s3, done_build
+
+    li  $t1, 0           # j = 0
+build_cols:
+    bge $t1, $s3, insert_b
+
+    # Compute &A[i][j]
+    mul $t2, $t0, $s3
+    add $t2, $t2, $t1
+    sll $t2, $t2, 2
+    add $t3, $s0, $t2
+    lwc1 $f0, 0($t3)
+
+    # Compute &Aug[i][j]
+    addi $t4, $s3, 1      # cols = N+1
+    mul  $t5, $t0, $t4    # i*(N+1)
+    add  $t5, $t5, $t1    # +j
+    sll  $t5, $t5, 2
+    add  $t6, $t9, $t5
+    swc1 $f0, 0($t6)
+
+    addi $t1, $t1, 1
+    j    build_cols
+
+insert_b:
+    # b[i] → Aug[i][N]
+    sll  $t2, $t0, 2
+    add  $t3, $s1, $t2
+    lwc1 $f0, 0($t3)
+
+    addi $t4, $s3, 1
+    mul  $t5, $t0, $t4
+    add  $t5, $t5, $s3     # column N
+    sll  $t5, $t5, 2
+    add  $t6, $t9, $t5
+    swc1 $f0, 0($t6)
+
+    addi $t0, $t0, 1
+    j    build_rows
+
+done_build:
+
+#############################################################
+# 2. FORWARD ELIMINATION (make matrix upper triangular)
+#############################################################
+
+    li $t0, 0                 # pivot col = 0
+elim_loop:
+    bge $t0, $s3, start_back
+
+    # Pivot index = t0 by default (no full search to simplify)
+    move $t7, $t0
+
+    # Load pivot Aug[t0][t0]
+    addi $t4, $s3, 1
+    mul  $t5, $t0, $t4
+    add  $t5, $t5, $t0
+    sll  $t5, $t5, 2
+    add  $t6, $t9, $t5
+    lwc1 $f0, 0($t6)
+
+    # If pivot is 0.0 → replace with small epsilon
+    lwc1 $f1, eps_f
+    c.eq.s $f0, $f1
+    bc1t skip_piv
+skip_piv:
+
+    # Eliminate rows below pivot row
+    addi $t1, $t0, 1
+elim_rows:
+    bge $t1, $s3, next_pivot
+
+    # Load factor = Aug[r][col] / pivot
+    mul $t5, $t1, $t4
+    add $t5, $t5, $t0
+    sll $t5, $t5, 2
+    add $t6, $t9, $t5
+    lwc1 $f2, 0($t6)
+    div.s $f3, $f2, $f0
+
+    # For each column c = col → N
+    move $t2, $t0
+elim_cols:
+    bgt $t2, $s3, finish_row
+
+    # M[r][c] -= factor*M[col][c]
+    # load M[r][c]
+    mul $t5, $t1, $t4
+    add $t5, $t5, $t2
+    sll $t5, $t5, 2
+    add $t6, $t9, $t5
+    lwc1 $f4, 0($t6)
+
+    # load M[col][c]
+    mul $t5, $t0, $t4
+    add $t5, $t5, $t2
+    sll $t5, $t5, 2
+    add $t7, $t9, $t5
+    lwc1 $f5, 0($t7)
+
+    # M[r][c] = M[r][c] - factor*M[col][c]
+    mul.s $f6, $f3, $f5
+    sub.s $f4, $f4, $f6
+    swc1 $f4, 0($t6)
+
+    addi $t2, $t2, 1
+    j    elim_cols
+
+finish_row:
+    addi $t1, $t1, 1
+    j    elim_rows
+
+next_pivot:
+    addi $t0, $t0, 1
+    j    elim_loop
+
+#############################################################
+# 3. BACK SUBSTITUTION (solve x[] from bottom to top)
+#############################################################
+
+start_back:
+    addi $t0, $s3, -1      # i = N-1
+
+back_loop:
+    bltz $t0, done_solver
+
+    # Load RHS value s = Aug[i][N]
+    addi $t4, $s3, 1
+    mul  $t5, $t0, $t4
+    add  $t5, $t5, $s3
+    sll  $t5, $t5, 2
+    add  $t6, $t9, $t5
+    lwc1 $f10, 0($t6)
+
+    # Subtract A[i][j] * x[j] for j = i+1..N-1
+    addi $t1, $t0, 1
+sub_loop:
+    bge  $t1, $s3, divide_diag
+
+    # load x[j]
+    sll $t6, $t1, 2
+    add $t7, $s2, $t6
+    lwc1 $f11, 0($t7)
+
+    # load A[i][j]
+    mul $t5, $t0, $t4
+    add $t5, $t5, $t1
+    sll $t5, $t5, 2
+    add $t7, $t9, $t5
+    lwc1 $f12, 0($t7)
+
+    mul.s $f13, $f11, $f12
+    sub.s $f10, $f10, $f13
+
+    addi $t1, $t1, 1
+    j    sub_loop
+
+divide_diag:
+    # Compute x[i] = s / Aug[i][i]
+    mul $t5, $t0, $t4
+    add $t5, $t5, $t0
+    sll $t5, $t5, 2
+    add $t6, $t9, $t5
+    lwc1 $f0, 0($t6)
+
+    div.s $f1, $f10, $f0
+
+    # Store x[i]
+    sll $t5, $t0, 2
+    add $t6, $s2, $t5
+    swc1 $f1, 0($t6)
+
+    addi $t0, $t0, -1
+    j    back_loop
+
+#############################################################
+# Restore saved regs + return
+#############################################################
+
+done_solver:
+    lw   $ra, 28($sp)
+    lw   $s0, 24($sp)
+    lw   $s1, 20($sp)
+    lw   $s2, 16($sp)
+    lw   $s3, 12($sp)
+    addi $sp, $sp, 32
+    jr   $ra
 
 # ---------------------------------------------------------
 # applyWienerFilter(input[], coefficients[], output[], N)
