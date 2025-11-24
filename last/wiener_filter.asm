@@ -568,6 +568,64 @@ done_solver:
 # ---------------------------------------------------------
 applyWienerFilter:
     # TODO
+# Save registers
+    addi $sp, $sp, -16
+    sw   $ra, 12($sp)
+    sw   $s0, 8($sp)        # M is stored here
+
+    # n = 0
+    li   $t0, 0
+
+loop_n:
+    beq  $t0, $a3, done_filter   # if n == N → finished
+
+    # accumulator = 0.0
+    li   $t1, 0
+    mtc1 $t1, $f4                # f4 = 0.0
+
+    # k = 0
+    li   $t1, 0
+
+loop_k:
+    beq  $t1, $s0, store_output  # if k == M → end inner loop
+
+    # index = n - k
+    sub  $t2, $t0, $t1
+    bltz $t2, skip_term          # if negative → skip
+
+    # load input[n-k]
+    sll  $t3, $t2, 2
+    add  $t3, $t3, $a0
+    lwc1 $f6, 0($t3)
+
+    # load coeff[k]
+    sll  $t4, $t1, 2
+    add  $t4, $t4, $a1
+    lwc1 $f8, 0($t4)
+
+    # acc += input * coeff
+    mul.s $f10, $f6, $f8
+    add.s $f4, $f4, $f10
+
+skip_term:
+    addi $t1, $t1, 1
+    j    loop_k
+
+store_output:
+    # store y[n] = accumulator
+    sll  $t5, $t0, 2
+    add  $t5, $t5, $a2
+    swc1 $f4, 0($t5)
+
+    addi $t0, $t0, 1
+    j    loop_n
+
+done_filter:
+    # restore saved regs
+    lw   $s0, 8($sp)
+    lw   $ra, 12($sp)
+    addi $sp, $sp, 16
+    jr   $ra
 
 # ---------------------------------------------------------
 # computeMMSE(desired[], output[], N) -> $f0
