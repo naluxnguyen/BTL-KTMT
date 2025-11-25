@@ -214,8 +214,12 @@ main:
     # --- solveLinearSystem ---
     # TODO
 
+    jal solveLinearSystem
+
     # --- applyWienerFilter ---
     # TODO
+    
+    jal applyWienerFilter
 
     # --- compute MMSE ---
     # TODO  
