@@ -219,6 +219,7 @@ main:
 
     # --- compute MMSE ---
     # TODO  
+    jal  computeMMSE
 
     # --- Open output file ---
     # TODO
