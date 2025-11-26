@@ -4,6 +4,7 @@ desired_file: .asciiz "desired.txt"
 output_file:  .asciiz "output.txt"
 buf_size:     .word 32768
 buffer:       .space 32768
+buffer_ptr:   .word 0
 NUM_SAMPLES:  .word 10
 desired:      .float 0.0:10
 input:        .float 0.0:10
@@ -14,24 +15,23 @@ R:            .space 400
 coeff:        .space 40
 ouput:        .space 40
 mmse:         .float 0.0
-zero_f:       .float 0.0
-one_f:        .float 1.0
+zero:         .float 0.0
+one:          .float 1.0
 ten:          .float 10.0
 hundred:      .float 100.0
 half:         .float 0.5
 minus_half:   .float -0.5
-zero:         .float 0.0
 header_filtered: .asciiz "Filtered output: "
 header_mmse:  .asciiz "\nMMSE: "
 space_str:    .asciiz " "
 str_buf:      .space 32
 temp_str:     .space 32
 file_buffer:  .space 1024
-fiel_buffer2: .space 2048
+file_buffer2: .space 2048
 error_open:   .asciiz "Error: Can not open file"
 error_size:   .asciiz "Error: size not match"
-esp_f: .float 1.0e-12
-
+eps_f: .float 1.0e-12
+Aug:          .space 440 
 .text
 .globl main
 
@@ -123,70 +123,6 @@ main:
     lw   $s0, 4($sp)
     lw   $ra, 8($sp)
     addi $sp, $sp, 12
-    jr   $ra
-    
-    parse_float:
-    lw   $t0, buffer_ptr
-    l.s  $f0, zero
-    l.s  $f1, ten
-    li   $t2, 0
-
-    skip_whitespace:
-    lb   $t1, 0($t0)
-    beq  $t1, 32, advance_ws
-    beq  $t1, 10, advance_ws
-    beq  $t1, 13, advance_ws
-    beq  $t1, 9,  advance_ws
-    j    check_sign
-
-    advance_ws: 
-    addi $t0, $t0, 1
-    j    skip_whitespace
-
-    check_sign:
-    lb   $t1, 0($t0)
-    bne  $t1, '-', parse_int_part
-    li   $t2, 1
-    addi $t0, $t0, 1
-
-    parse_int_part:
-    lb   $t1, 0($t0)
-    blt  $t1, '0', check_dot
-    bgt  $t1, '9', check_dot
-    sub  $t1, $t1, '0'
-    mtc1 $t1, $f2
-    cvt.s.w $f2, $f2
-    mul.s $f0, $f0, $f1
-    add.s $f0, $f0, $f2
-    addi $t0, $t0, 1
-    j    parse_int_part
-
-    check_dot:
-    lb   $t1, 0($t0)
-    bne  $t1, '.', apply_sign
-    addi $t0, $t0, 1
-    l.s  $f3, one
-
-    parse_frac_part:
-    lb   $t1, 0($t0)
-    blt  $t1, '0', apply_sign
-    bgt  $t1, '9', apply_sign
-    sub  $t1, $t1, '0'
-    mul.s $f3, $f3, $f1 
-    mtc1 $t1, $f2
-    cvt.s.w $f2, $f2
-    div.s $f2, $f2, $f3
-    add.s $f0, $f0, $f2
-    addi $t0, $t0, 1
-    j    parse_frac_part
-
-    apply_sign:
-    beq  $t2, 0, parse_finish
-    neg.s $f0, $f0
-
-    parse_finish:
-    sw   $t0, buffer_ptr
-    jr   $ra
 
     # --- compute crosscorrelation ---
     la   $a0, desired
@@ -200,7 +136,7 @@ main:
     
     la    $a0, input           
     la    $a1, autocorr       
-    move  $a2, $s7             
+    lw    $a2, NUM_SAMPLES
     jal   computeAutocorrelation
 
     # --- create Toeplitz matrix ---
@@ -208,17 +144,25 @@ main:
     
     la    $a0, autocorr       
     la    $a1, R               
-    move  $a2, $s7             
+    lw    $a2, NUM_SAMPLES
     jal   createToeplitzMatrix
 
     # --- solveLinearSystem ---
     # TODO
 
+    la   $a0, R
+    la   $a1, crosscorr
+    la   $a2, coeff
+    lw   $a3, NUM_SAMPLES
     jal solveLinearSystem
 
     # --- applyWienerFilter ---
     # TODO
     
+    la   $a0, input
+    la   $a1, coeff
+    la   $a2, filtered
+    lw   $a3, NUM_SAMPLES
     jal applyWienerFilter
 
     # --- compute MMSE ---
@@ -341,9 +285,75 @@ main:
     li   $v0, 16
     move $a0, $s6
     syscall
-
+    
     li   $v0, 10
     syscall
+    
+# =========================================================
+# HELPER FUNCTIONS (Moved outside main flow)
+# =========================================================
+    parse_float:
+    lw   $t0, buffer_ptr
+    l.s  $f0, zero
+    l.s  $f1, ten
+    li   $t2, 0
+
+    skip_whitespace:
+    lb   $t1, 0($t0)
+    beq  $t1, 32, advance_ws
+    beq  $t1, 10, advance_ws
+    beq  $t1, 13, advance_ws
+    beq  $t1, 9,  advance_ws
+    j    check_sign
+
+    advance_ws: 
+    addi $t0, $t0, 1
+    j    skip_whitespace
+
+    check_sign:
+    lb   $t1, 0($t0)
+    bne  $t1, '-', parse_int_part
+    li   $t2, 1
+    addi $t0, $t0, 1
+
+    parse_int_part:
+    lb   $t1, 0($t0)
+    blt  $t1, '0', check_dot
+    bgt  $t1, '9', check_dot
+    sub  $t1, $t1, '0'
+    mtc1 $t1, $f2
+    cvt.s.w $f2, $f2
+    mul.s $f0, $f0, $f1
+    add.s $f0, $f0, $f2
+    addi $t0, $t0, 1
+    j    parse_int_part
+
+    check_dot:
+    lb   $t1, 0($t0)
+    bne  $t1, '.', apply_sign
+    addi $t0, $t0, 1
+    l.s  $f3, one
+
+    parse_frac_part:
+    lb   $t1, 0($t0)
+    blt  $t1, '0', apply_sign
+    bgt  $t1, '9', apply_sign
+    sub  $t1, $t1, '0'
+    mul.s $f3, $f3, $f1 
+    mtc1 $t1, $f2
+    cvt.s.w $f2, $f2
+    div.s $f2, $f2, $f3
+    add.s $f0, $f0, $f2
+    addi $t0, $t0, 1
+    j    parse_frac_part
+
+    apply_sign:
+    beq  $t2, 0, parse_finish
+    neg.s $f0, $f0
+
+    parse_finish:
+    sw   $t0, buffer_ptr
+    jr   $ra
 
 # ---------------------------------------------------------
 # computeAutocorrelation(input[], autocorr[], N)
@@ -759,6 +769,7 @@ applyWienerFilter:
     addi $sp, $sp, -16
     sw   $ra, 12($sp)
     sw   $s0, 8($sp)        # M is stored here
+    move $s0, $a3           # M = N
 
     # n = 0
     li   $t0, 0
@@ -864,7 +875,7 @@ round_to_1dec:
     l.s $f1, ten
     mul.s $f3, $f12, $f1
     # if f3 < 0:
-    l.s $f2, zero_f
+    l.s $f2, zero
     c.lt.s $f3, $f2
     bc1t f3_is_neg              # Branch if true
     # else: f3 = f3 + 0.5
@@ -908,7 +919,7 @@ float_to_str:
     li $s2, 0          # length = 0
 
     # Handle Sign
-    l.s $f1, zero_f
+    l.s $f1, zero
     c.lt.s $f20, $f1
     bc1f fts_sign_done
     nop
