@@ -1,3 +1,4 @@
+debugging:
 .data
 input_file:   .asciiz "input.txt"
 desired_file: .asciiz "desired.txt"
@@ -32,6 +33,8 @@ error_open:   .asciiz "Error: Can not open file"
 error_size:   .asciiz "Error: size not match"
 eps_f: .float 1.0e-12
 Aug:          .space 440 
+count_input:   .word 0
+count_desired: .word 0
 .text
 .globl main
 
@@ -49,7 +52,7 @@ main:
     li   $a1, 0
     li   $a2, 0
     syscall
-    bltz $v0, error_open
+    bltz $v0, open_error
     move $s0, $v0
 
     li   $v0, 14
@@ -73,8 +76,8 @@ main:
     la   $s1, input
 
     read_input_loop:
-    beq  $s0, 10, read_desired
     jal  parse_float
+    beq  $v1, $zero, read_desired
     s.s  $f0, 0($s1)            
     addi $s0, $s0, 1
     addi $s1, $s1, 4
@@ -82,12 +85,13 @@ main:
 
     # --- Read "desired.txt" ---
     read_desired:
+    sw   $s0, count_input 	# save input count
     li   $v0, 13
     la   $a0, desired_file
     li   $a1, 0
     li   $a2, 0
     syscall
-    bltz $v0, error_open
+    bltz $v0, open_error
     move $s0, $v0
 
     li   $v0, 14
@@ -111,13 +115,20 @@ main:
     la   $s1, desired
 
     read_desired_loop:
-    beq  $s0, 10, read_done
     jal  parse_float
-    s.s  $f0, 0($s1)           
+    beq  $v1, $zero, validate_size
+    s.s  $f0, 0($s1)            
     addi $s0, $s0, 1
     addi $s1, $s1, 4
     j    read_desired_loop
-
+	
+    validate_size:
+    sw   $s0, count_desired	# save desired count
+    lw   $t0, count_input
+    lw   $t1, count_desired
+    bne  $t0, $t1, size_error
+    j    read_done
+    
     read_done:
     lw   $s1, 0($sp)
     lw   $s0, 4($sp)
@@ -289,6 +300,20 @@ main:
     li   $v0, 10
     syscall
     
+    open_error:
+    li $v0, 4
+    la $a0, error_open
+    syscall
+    li $v0, 10
+    syscall
+
+    size_error:
+    li $v0, 4
+    la $a0, error_size
+    syscall
+    li $v0, 10
+    syscall
+    
 # =========================================================
 # HELPER FUNCTIONS (Moved outside main flow)
 # =========================================================
@@ -300,6 +325,7 @@ main:
 
     skip_whitespace:
     lb   $t1, 0($t0)
+    beq  $t1, $zero, end_of_buffer_found
     beq  $t1, 32, advance_ws
     beq  $t1, 10, advance_ws
     beq  $t1, 13, advance_ws
@@ -312,6 +338,7 @@ main:
 
     check_sign:
     lb   $t1, 0($t0)
+     beq  $t1, $zero, end_of_buffer_found
     bne  $t1, '-', parse_int_part
     li   $t2, 1
     addi $t0, $t0, 1
@@ -353,6 +380,11 @@ main:
 
     parse_finish:
     sw   $t0, buffer_ptr
+    li   $v1, 1
+    jr   $ra
+    
+    end_of_buffer_found:
+    li   $v1, 0
     jr   $ra
 
 # ---------------------------------------------------------
