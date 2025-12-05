@@ -1,7 +1,7 @@
 .data
 input_signal:       .asciiz "input.txt"
 desired_signal:     .asciiz "desired.txt"
-output_file:        .asciiz "output.txt"
+output_signal:        .asciiz "output.txt"
 buf_size:           .word 32768
 buffer:             .space 32768
 buffer_ptr:         .word 0
@@ -182,7 +182,7 @@ main:
     # --- Open output file ---
     # TODO
     li   $v0, 13
-    la   $a0, output_file
+    la   $a0, output_signal
     li   $a1, 1
     li   $a2, 0
     syscall
