@@ -7,14 +7,14 @@ buffer:       .space 32768
 NUM_SAMPLES:  .word 10
 input_count:  .word 0
 desired_count: .word 0
-desired:      .float 0.0:10
-input:        .float 0.0:10
+desired_signal:      .float 0.0:10
+input_signal:        .float 0.0:10
 filtered:     .float 0.0:10
 crosscorr:    .space 40
 autocorr:     .space 40
 R:            .space 400
 Aug:          .space 440
-coeff:        .space 40
+optimize_coefficient:        .space 40
 ouput:        .space 40
 mmse:         .float 0.0
 zero_f:       .float 0.0
@@ -75,7 +75,7 @@ main:
     la   $t0, file_buffer2
     sw   $t0, buffer_ptr
     li   $s0, 0
-    la   $s1, input
+    la   $s1, input_signal
 
     read_input_loop:
     jal  parse_float
@@ -117,7 +117,7 @@ main:
     la   $t0, file_buffer2
     sw   $t0, buffer_ptr
     li   $s0, 0
-    la   $s1, desired
+    la   $s1, desired_signal
 
     read_desired_loop:
     jal  parse_float
@@ -268,8 +268,8 @@ start_processing:
     lw   $s7, input_count
     
     # --- compute crosscorrelation ---
-    la   $a0, desired
-    la   $a1, input
+    la   $a0, desired_signal
+    la   $a1, input_signal
     la   $a2, crosscorr
     move $a3, $s7              # N = actual count
     jal  computeCrosscorrelation
@@ -277,7 +277,7 @@ start_processing:
     # --- compute autocorrelation ---
     # TODO
     
-    la    $a0, input           
+    la    $a0, input_signal           
     la    $a1, autocorr       
     move  $a2, $s7             
     jal   computeAutocorrelation
@@ -295,15 +295,15 @@ start_processing:
 
     la    $a0, R               # A = Toeplitz matrix R
     la    $a1, crosscorr       # b = crosscorr vector
-    la    $a2, coeff           # x = coeff (output)
+    la    $a2, optimize_coefficient           # x = coeff (output)
     move  $a3, $s7             # N = actual count
     jal solveLinearSystem
 
     # --- applyWienerFilter ---
     # TODO
     
-    la    $a0, input           # input signal
-    la    $a1, coeff           # Wiener coefficients
+    la    $a0, input_signal           # input signal
+    la    $a1, optimize_coefficient           # Wiener coefficients
     la    $a2, filtered        # filtered output
     move  $a3, $s7             # N = actual count
     jal applyWienerFilter
@@ -906,7 +906,7 @@ done_filter:
 # ---------------------------------------------------------
 computeMMSE:
     # TODO
-    la   $t0, desired       
+    la   $t0, desired_signal
     la   $t1, filtered      
     lw   $t2, input_count      # Use actual count
     
