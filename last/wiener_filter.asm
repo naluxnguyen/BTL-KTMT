@@ -1,54 +1,53 @@
-debugging:
 .data
-input_file:   .asciiz "input.txt"
-desired_file: .asciiz "desired.txt"
-output_file:  .asciiz "output.txt"
-buf_size:     .word 32768
-buffer:       .space 32768
-buffer_ptr:   .word 0
-NUM_SAMPLES:  .word 10
-desired:      .float 0.0:10
-input:        .float 0.0:10
-filtered:     .float 0.0:10
-crosscorr:    .space 40
-autocorr:     .space 40
-R:            .space 400
-coeff:        .space 40
-ouput:        .space 40
-mmse:         .float 0.0
-zero:         .float 0.0
-one:          .float 1.0
-ten:          .float 10.0
-hundred:      .float 100.0
-half:         .float 0.5
-minus_half:   .float -0.5
-header_filtered: .asciiz "Filtered output: "
-header_mmse:  .asciiz "\nMMSE: "
-space_str:    .asciiz " "
-str_buf:      .space 32
-temp_str:     .space 32
-file_buffer:  .space 1024
-file_buffer2: .space 2048
-error_open:   .asciiz "Error: Can not open file"
-error_size:   .asciiz "Error: size not match"
-eps_f: .float 1.0e-12
-Aug:          .space 440 
-count_input:   .word 0
-count_desired: .word 0
+input_signal:       .asciiz "input.txt"
+desired_signal:     .asciiz "desired.txt"
+output_file:        .asciiz "output.txt"
+buf_size:           .word 32768
+buffer:             .space 32768
+buffer_ptr:         .word 0
+NUM_SAMPLES:        .word 10
+desired:            .float 0.0:10
+input:              .float 0.0:10
+filtered:           .float 0.0:10
+crosscorr:          .space 40
+autocorr:           .space 40
+R:                  .space 400
+optimize_coefficient: .space 40
+ouput:              .space 40
+mmse:               .float 0.0
+zero:               .float 0.0
+one:                .float 1.0
+ten:                .float 10.0
+hundred:            .float 100.0
+half:               .float 0.5
+minus_half:         .float -0.5
+header_filtered:    .asciiz "Filtered output: "
+header_mmse:        .asciiz "\nMMSE: "
+space_str:          .asciiz " "
+str_buf:            .space 32
+temp_str:           .space 32
+file_buffer:        .space 1024
+file_buffer2:       .space 2048
+error_open:         .asciiz "Error: Can not open file"
+error_size:         .asciiz "Error: size not match"
+eps_f:              .float 1.0e-12
+Aug:                .space 440 
+count_input:        .word 0
+count_desired:      .word 0
 .text
 .globl main
 
 main:
     # --- Open and read input file for input[] ---
     # TODO
-       addi $sp, $sp, -12
+    addi $sp, $sp, -12
     sw   $ra, 8($sp)
     sw   $s0, 4($sp)
     sw   $s1, 0($sp)
 
     # --- Read "input.txt" ---
     li   $v0, 13
-    la   $a0, input_file
+    la   $a0, input_signal
     li   $a1, 0
     li   $a2, 0
     syscall
@@ -87,7 +86,7 @@ main:
     read_desired:
     sw   $s0, count_input 	# save input count
     li   $v0, 13
-    la   $a0, desired_file
+    la   $a0, desired_signal
     li   $a1, 0
     li   $a2, 0
     syscall
@@ -163,7 +162,7 @@ main:
 
     la   $a0, R
     la   $a1, crosscorr
-    la   $a2, coeff
+    la   $a2, optimize_coefficient
     lw   $a3, NUM_SAMPLES
     jal solveLinearSystem
 
@@ -171,7 +170,7 @@ main:
     # TODO
     
     la   $a0, input
-    la   $a1, coeff
+    la   $a1, optimize_coefficient
     la   $a2, filtered
     lw   $a3, NUM_SAMPLES
     jal applyWienerFilter
@@ -828,12 +827,12 @@ loop_k:
     add  $t3, $t3, $a0
     lwc1 $f6, 0($t3)
 
-    # load coeff[k]
+    # load optimize_coefficient[k]
     sll  $t4, $t1, 2
     add  $t4, $t4, $a1
     lwc1 $f8, 0($t4)
 
-    # acc += input * coeff
+    # acc += input * coefficient
     mul.s $f10, $f6, $f8
     add.s $f4, $f4, $f10
 
