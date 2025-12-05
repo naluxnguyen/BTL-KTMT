@@ -1,57 +1,60 @@
 .data
-input_signal:       .asciiz "input.txt"
-desired_signal:     .asciiz "desired.txt"
-output_signal:        .asciiz "output.txt"
-buf_size:           .word 32768
-buffer:             .space 32768
-buffer_ptr:         .word 0
-NUM_SAMPLES:        .word 10
-desired:            .float 0.0:10
-input:              .float 0.0:10
-filtered:           .float 0.0:10
-crosscorr:          .space 40
-autocorr:           .space 40
-R:                  .space 400
-optimize_coefficient: .space 40
-ouput:              .space 40
-mmse:               .float 0.0
-zero:               .float 0.0
-one:                .float 1.0
-ten:                .float 10.0
-hundred:            .float 100.0
-half:               .float 0.5
-minus_half:         .float -0.5
-header_filtered:    .asciiz "Filtered output: "
-header_mmse:        .asciiz "\nMMSE: "
-space_str:          .asciiz " "
-str_buf:            .space 32
-temp_str:           .space 32
-file_buffer:        .space 1024
-file_buffer2:       .space 2048
-error_open:         .asciiz "Error: Can not open file"
-error_size:         .asciiz "Error: size not match"
-eps_f:              .float 1.0e-12
-Aug:                .space 440 
-count_input:        .word 0
-count_desired:      .word 0
+input_file:.asciiz "Input_test/input19-44-21_11-Nov-25_10_10_1.txt"
+desired_file:.asciiz "Input_test/desired19-44-21_11-Nov-25_10_10.txt"
+output_file:.asciiz "Input_test/output1.txt"
+buf_size:     .word 32768
+buffer:       .space 32768
+NUM_SAMPLES:  .word 10
+input_count:  .word 0
+desired_count: .word 0
+desired:      .float 0.0:10
+input:        .float 0.0:10
+filtered:     .float 0.0:10
+crosscorr:    .space 40
+autocorr:     .space 40
+R:            .space 400
+Aug:          .space 440
+coeff:        .space 40
+ouput:        .space 40
+mmse:         .float 0.0
+zero_f:       .float 0.0
+one_f:        .float 1.0
+one:          .float 1.0
+ten:          .float 10.0
+hundred:      .float 100.0
+half:         .float 0.5
+minus_half:   .float -0.5
+zero:         .float 0.0
+header_filtered: .asciiz "Filtered output: "
+header_mmse:  .asciiz "\nMMSE: "
+space_str:    .asciiz " "
+str_buf:      .space 32
+temp_str:     .space 32
+file_buffer:  .space 1024
+file_buffer2: .space 2048
+buffer_ptr:   .word 0
+error_open:   .asciiz "Error: Can not open file"
+error_size:   .asciiz "Error: size not match"
+eps_f: .float 1.0e-12
+
 .text
 .globl main
 
 main:
     # --- Open and read input file for input[] ---
     # TODO
-    addi $sp, $sp, -12
+       addi $sp, $sp, -12
     sw   $ra, 8($sp)
     sw   $s0, 4($sp)
     sw   $s1, 0($sp)
 
     # --- Read "input.txt" ---
     li   $v0, 13
-    la   $a0, input_signal
+    la   $a0, input_file
     li   $a1, 0
     li   $a2, 0
     syscall
-    bltz $v0, open_error
+    bltz $v0, error_open
     move $s0, $v0
 
     li   $v0, 14
@@ -76,21 +79,24 @@ main:
 
     read_input_loop:
     jal  parse_float
-    beq  $v1, $zero, read_desired
+    beq  $v1, $zero, input_done  # $v1=0 means no more data
     s.s  $f0, 0($s1)            
     addi $s0, $s0, 1
     addi $s1, $s1, 4
+    bge  $s0, 10, input_done     # Max 10 elements
     j    read_input_loop
+
+    input_done:
+    sw   $s0, input_count        # Save actual count
 
     # --- Read "desired.txt" ---
     read_desired:
-    sw   $s0, count_input 	# save input count
     li   $v0, 13
-    la   $a0, desired_signal
+    la   $a0, desired_file
     li   $a1, 0
     li   $a2, 0
     syscall
-    bltz $v0, open_error
+    bltz $v0, error_open
     move $s0, $v0
 
     li   $v0, 14
@@ -115,30 +121,157 @@ main:
 
     read_desired_loop:
     jal  parse_float
-    beq  $v1, $zero, validate_size
-    s.s  $f0, 0($s1)            
+    beq  $v1, $zero, desired_done  # $v1=0 means no more data
+    s.s  $f0, 0($s1)           
     addi $s0, $s0, 1
     addi $s1, $s1, 4
+    bge  $s0, 10, desired_done     # Max 10 elements
     j    read_desired_loop
-	
-    validate_size:
-    sw   $s0, count_desired	# save desired count
-    lw   $t0, count_input
-    lw   $t1, count_desired
-    bne  $t0, $t1, size_error
-    j    read_done
-    
-    read_done:
-    lw   $s1, 0($sp)
-    lw   $s0, 4($sp)
-    lw   $ra, 8($sp)
-    addi $sp, $sp, 12
 
+    desired_done:
+    sw   $s0, desired_count      # Save actual count
+
+read_done:
+    # Check if sizes match
+    lw   $t0, input_count
+    lw   $t1, desired_count
+    bne  $t0, $t1, size_error
+    
+    # Files loaded, continue to processing
+    j    start_processing
+
+size_error:
+    # Open output.txt to write error message
+    li   $v0, 13
+    la   $a0, output_file
+    li   $a1, 1               # Write mode
+    li   $a2, 0
+    syscall
+    move $s6, $v0             # Save file descriptor
+    
+    # Write error message to file
+    li   $v0, 15
+    move $a0, $s6
+    la   $a1, error_size
+    li   $a2, 21              # Length of "Error: size not match"
+    syscall
+    
+    # Close file
+    li   $v0, 16
+    move $a0, $s6
+    syscall
+    
+    # 1. Open output file (?? ch?a th?ng b?o l?i)
+    li $v0, 13
+    la $a0, output_file
+    li $a1, 0    
+    syscall
+    move $s6, $v0 
+    
+    # 2. Read file
+    li $v0, 14
+    move $a0, $s6
+    la $a1, file_buffer
+    li $a2, 1024
+    syscall
+    
+    # 3. Null-terminate the buffer 
+    la $t0, file_buffer
+    add $t0, $t0, $v0 
+    sb $zero, 0($t0) 
+
+    # 4. Print the buffer into console 
+    li $v0, 4    
+    la $a0, file_buffer
+    syscall
+
+    # 5. Close output file 
+    li $v0, 16
+    move $a0, $s6
+    syscall
+
+    # 6. Exit program
+    li $v0, 10
+    syscall
+    
+parse_float:
+    lw   $t0, buffer_ptr
+    l.s  $f0, zero
+    l.s  $f1, ten
+    li   $t2, 0
+
+    skip_whitespace:
+    lb   $t1, 0($t0)
+    beq  $t1, $zero, parse_no_data  # Check for null terminator
+    beq  $t1, 32, advance_ws
+    beq  $t1, 10, advance_ws
+    beq  $t1, 13, advance_ws
+    beq  $t1, 9,  advance_ws
+    j    check_sign
+
+    advance_ws: 
+    addi $t0, $t0, 1
+    j    skip_whitespace
+
+    check_sign:
+    lb   $t1, 0($t0)
+    bne  $t1, '-', parse_int_part
+    li   $t2, 1
+    addi $t0, $t0, 1
+
+    parse_int_part:
+    lb   $t1, 0($t0)
+    blt  $t1, '0', check_dot
+    bgt  $t1, '9', check_dot
+    sub  $t1, $t1, '0'
+    mtc1 $t1, $f2
+    cvt.s.w $f2, $f2
+    mul.s $f0, $f0, $f1
+    add.s $f0, $f0, $f2
+    addi $t0, $t0, 1
+    j    parse_int_part
+
+    check_dot:
+    lb   $t1, 0($t0)
+    bne  $t1, '.', apply_sign
+    addi $t0, $t0, 1
+    l.s  $f3, one
+
+    parse_frac_part:
+    lb   $t1, 0($t0)
+    blt  $t1, '0', apply_sign
+    bgt  $t1, '9', apply_sign
+    sub  $t1, $t1, '0'
+    mul.s $f3, $f3, $f1 
+    mtc1 $t1, $f2
+    cvt.s.w $f2, $f2
+    div.s $f2, $f2, $f3
+    add.s $f0, $f0, $f2
+    addi $t0, $t0, 1
+    j    parse_frac_part
+
+    apply_sign:
+    beq  $t2, 0, parse_finish
+    neg.s $f0, $f0
+
+    parse_finish:
+    sw   $t0, buffer_ptr
+    li   $v1, 1              # Success flag
+    jr   $ra
+
+    parse_no_data:
+    li   $v1, 0              # No more data flag
+    jr   $ra
+
+start_processing:
+    # Load actual input count into $s7 for use throughout
+    lw   $s7, input_count
+    
     # --- compute crosscorrelation ---
     la   $a0, desired
     la   $a1, input
     la   $a2, crosscorr
-    lw   $a3, NUM_SAMPLES
+    move $a3, $s7              # N = actual count
     jal  computeCrosscorrelation
 
     # --- compute autocorrelation ---
@@ -146,7 +279,7 @@ main:
     
     la    $a0, input           
     la    $a1, autocorr       
-    lw    $a2, NUM_SAMPLES
+    move  $a2, $s7             
     jal   computeAutocorrelation
 
     # --- create Toeplitz matrix ---
@@ -154,25 +287,25 @@ main:
     
     la    $a0, autocorr       
     la    $a1, R               
-    lw    $a2, NUM_SAMPLES
+    move  $a2, $s7             
     jal   createToeplitzMatrix
 
     # --- solveLinearSystem ---
     # TODO
 
-    la   $a0, R
-    la   $a1, crosscorr
-    la   $a2, optimize_coefficient
-    lw   $a3, NUM_SAMPLES
+    la    $a0, R               # A = Toeplitz matrix R
+    la    $a1, crosscorr       # b = crosscorr vector
+    la    $a2, coeff           # x = coeff (output)
+    move  $a3, $s7             # N = actual count
     jal solveLinearSystem
 
     # --- applyWienerFilter ---
     # TODO
     
-    la   $a0, input
-    la   $a1, optimize_coefficient
-    la   $a2, filtered
-    lw   $a3, NUM_SAMPLES
+    la    $a0, input           # input signal
+    la    $a1, coeff           # Wiener coefficients
+    la    $a2, filtered        # filtered output
+    move  $a3, $s7             # N = actual count
     jal applyWienerFilter
 
     # --- compute MMSE ---
@@ -182,7 +315,7 @@ main:
     # --- Open output file ---
     # TODO
     li   $v0, 13
-    la   $a0, output_signal
+    la   $a0, output_file
     li   $a1, 1
     li   $a2, 0
     syscall
@@ -198,7 +331,7 @@ main:
 
     # Write filtered outputs with 1 decimal
     la   $s1, filtered 
-    lw   $s2, NUM_SAMPLES      
+    lw   $s2, input_count      # Use actual count
     li   $s0, 0              
     
     write_loop_start:
@@ -295,96 +428,9 @@ main:
     li   $v0, 16
     move $a0, $s6
     syscall
-    
+
     li   $v0, 10
     syscall
-    
-    open_error:
-    li $v0, 4
-    la $a0, error_open
-    syscall
-    li $v0, 10
-    syscall
-
-    size_error:
-    li $v0, 4
-    la $a0, error_size
-    syscall
-    li $v0, 10
-    syscall
-    
-# =========================================================
-# HELPER FUNCTIONS (Moved outside main flow)
-# =========================================================
-    parse_float:
-    lw   $t0, buffer_ptr
-    l.s  $f0, zero
-    l.s  $f1, ten
-    li   $t2, 0
-
-    skip_whitespace:
-    lb   $t1, 0($t0)
-    beq  $t1, $zero, end_of_buffer_found
-    beq  $t1, 32, advance_ws
-    beq  $t1, 10, advance_ws
-    beq  $t1, 13, advance_ws
-    beq  $t1, 9,  advance_ws
-    j    check_sign
-
-    advance_ws: 
-    addi $t0, $t0, 1
-    j    skip_whitespace
-
-    check_sign:
-    lb   $t1, 0($t0)
-     beq  $t1, $zero, end_of_buffer_found
-    bne  $t1, '-', parse_int_part
-    li   $t2, 1
-    addi $t0, $t0, 1
-
-    parse_int_part:
-    lb   $t1, 0($t0)
-    blt  $t1, '0', check_dot
-    bgt  $t1, '9', check_dot
-    sub  $t1, $t1, '0'
-    mtc1 $t1, $f2
-    cvt.s.w $f2, $f2
-    mul.s $f0, $f0, $f1
-    add.s $f0, $f0, $f2
-    addi $t0, $t0, 1
-    j    parse_int_part
-
-    check_dot:
-    lb   $t1, 0($t0)
-    bne  $t1, '.', apply_sign
-    addi $t0, $t0, 1
-    l.s  $f3, one
-
-    parse_frac_part:
-    lb   $t1, 0($t0)
-    blt  $t1, '0', apply_sign
-    bgt  $t1, '9', apply_sign
-    sub  $t1, $t1, '0'
-    mul.s $f3, $f3, $f1 
-    mtc1 $t1, $f2
-    cvt.s.w $f2, $f2
-    div.s $f2, $f2, $f3
-    add.s $f0, $f0, $f2
-    addi $t0, $t0, 1
-    j    parse_frac_part
-
-    apply_sign:
-    beq  $t2, 0, parse_finish
-    neg.s $f0, $f0
-
-    parse_finish:
-    sw   $t0, buffer_ptr
-    li   $v1, 1
-    jr   $ra
-    
-    end_of_buffer_found:
-    li   $v1, 0
-    jr   $ra
 
 # ---------------------------------------------------------
 # computeAutocorrelation(input[], autocorr[], N)
@@ -628,7 +674,7 @@ build_cols:
     j    build_cols
 
 insert_b:
-    # b[i] → Aug[i][N]
+    # b[i] ??? Aug[i][N]
     sll  $t2, $t0, 2
     add  $t3, $s1, $t2
     lwc1 $f0, 0($t3)
@@ -664,7 +710,7 @@ elim_loop:
     add  $t6, $t9, $t5
     lwc1 $f0, 0($t6)
 
-    # If pivot is 0.0 → replace with small epsilon
+    # If pivot is 0.0 ??? replace with small epsilon
     lwc1 $f1, eps_f
     c.eq.s $f0, $f1
     bc1t skip_piv
@@ -683,7 +729,7 @@ elim_rows:
     lwc1 $f2, 0($t6)
     div.s $f3, $f2, $f0
 
-    # For each column c = col → N
+    # For each column c = col ??? N
     move $t2, $t0
 elim_cols:
     bgt $t2, $s3, finish_row
@@ -800,13 +846,12 @@ applyWienerFilter:
     addi $sp, $sp, -16
     sw   $ra, 12($sp)
     sw   $s0, 8($sp)        # M is stored here
-    move $s0, $a3           # M = N
 
     # n = 0
     li   $t0, 0
 
 loop_n:
-    beq  $t0, $a3, done_filter   # if n == N → finished
+    beq  $t0, $a3, done_filter   # if n == N ??? finished
 
     # accumulator = 0.0
     li   $t1, 0
@@ -816,23 +861,23 @@ loop_n:
     li   $t1, 0
 
 loop_k:
-    beq  $t1, $s0, store_output  # if k == M → end inner loop
+    beq  $t1, $s0, store_output  # if k == M ??? end inner loop
 
     # index = n - k
     sub  $t2, $t0, $t1
-    bltz $t2, skip_term          # if negative → skip
+    bltz $t2, skip_term          # if negative ??? skip
 
     # load input[n-k]
     sll  $t3, $t2, 2
     add  $t3, $t3, $a0
     lwc1 $f6, 0($t3)
 
-    # load optimize_coefficient[k]
+    # load coeff[k]
     sll  $t4, $t1, 2
     add  $t4, $t4, $a1
     lwc1 $f8, 0($t4)
 
-    # acc += input * coefficient
+    # acc += input * coeff
     mul.s $f10, $f6, $f8
     add.s $f4, $f4, $f10
 
@@ -863,7 +908,7 @@ computeMMSE:
     # TODO
     la   $t0, desired       
     la   $t1, filtered      
-    lw   $t2, NUM_SAMPLES      
+    lw   $t2, input_count      # Use actual count
     
     mtc1 $zero, $f12            
     cvt.s.w $f12, $f12          
@@ -883,8 +928,10 @@ computeMMSE:
     j    mmse_loop
 
     mmse_done:
-    l.s   $f5, ten
-    div.s $f12, $f12, $f5       
+    lw    $t2, input_count      # Get actual count
+    mtc1  $t2, $f5              # Convert to float
+    cvt.s.w $f5, $f5
+    div.s $f12, $f12, $f5       # Divide by actual count
     
     # Store Result in Memory
     swc1  $f12, mmse
@@ -906,7 +953,7 @@ round_to_1dec:
     l.s $f1, ten
     mul.s $f3, $f12, $f1
     # if f3 < 0:
-    l.s $f2, zero
+    l.s $f2, zero_f
     c.lt.s $f3, $f2
     bc1t f3_is_neg              # Branch if true
     # else: f3 = f3 + 0.5
@@ -950,7 +997,7 @@ float_to_str:
     li $s2, 0          # length = 0
 
     # Handle Sign
-    l.s $f1, zero
+    l.s $f1, zero_f
     c.lt.s $f20, $f1
     bc1f fts_sign_done
     nop
